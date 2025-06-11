@@ -104,7 +104,7 @@ static unsigned char getGrayscaleMean(const unsigned char * const data,
 	return (unsigned char) (mean / HASH_LENGTH);
 }
 
-static uint64_t getFingerPrint(const unsigned char * const data)
+static uint64_t getFingerprint(const unsigned char * const data)
 {
 	unsigned char mean = getGrayscaleMean(data, HASH_WIDTH, HASH_HEIGHT);
 	uint64_t fingerprint = 0;
@@ -113,7 +113,9 @@ static uint64_t getFingerPrint(const unsigned char * const data)
 
 	for (i = 0; i < HASH_LENGTH; i++)
 	{
-		fingerprint |= (((data[i] > mean) ? 1 : 0) << i);
+		/* casting here is important as otherwise it tries to use an
+		 * int for the mask */
+		fingerprint |= (((uint64_t) ((data[i] > mean) ? 1 : 0)) << i);
 
 		if (verbose)
 		{
@@ -135,7 +137,7 @@ static uint64_t getFingerPrint(const unsigned char * const data)
 
 	if (verbose)
 	{
-		fprintf(stdout, "%lu\n", fingerprint);
+		fprintf(stdout, "%lu\n%lx\n", fingerprint, fingerprint);
 		fputc('\n', stdout);
 	}
 
@@ -150,7 +152,7 @@ static unsigned char calculateHamming(const uint64_t foo, const uint64_t bar)
 
 	for (i = 0; i < HASH_LENGTH; i++)
 	{
-		if (diff & (1 << i))
+		if (diff & (((uint64_t) 1) << i))
 		{
 			score++;
 		}
@@ -159,7 +161,7 @@ static unsigned char calculateHamming(const uint64_t foo, const uint64_t bar)
 	return score;
 }
 
-static uint64_t fingerPrintFile(const char * const path)
+static uint64_t fingerprintFile(const char * const path)
 {
 	unsigned char img_data[HASH_LENGTH];
 
@@ -175,7 +177,7 @@ static uint64_t fingerPrintFile(const char * const path)
 		return 0;
 	}
 
-	return getFingerPrint(img_data);
+	return getFingerprint(img_data);
 }
 
 static void printHelp(void)
@@ -186,6 +188,7 @@ static void printHelp(void)
 	fputs("Command Line Flags:\n", stdout);
 	fputs("\t-t, --threshold <NUM> : Similarity limit, default 10\n", 
 		stdout);
+	fputs("\t-o, --output <PATH>   : Path to output file\n", stdout);
 	fputs("\t-v, --verbose         : Enables extra information output\n",
 		stdout);
 	fputs("\t-h, --help            : Prints this message and exits\n",
@@ -204,6 +207,7 @@ int main(int argc, char **argv)
 	const struct portoptVerboseOpt opts[] =
 	{
 		{'t', "threshold", PORTOPT_TRUE},
+		{'o', "output",    PORTOPT_TRUE},
 		{'v', "verbose",   PORTOPT_FALSE},
 		{'h', "help",      PORTOPT_FALSE}
 	};
@@ -212,12 +216,12 @@ int main(int argc, char **argv)
 	size_t ind = 0;
 	int flag;
 
-	uint64_t left_print;
-	uint64_t right_print;
-	unsigned char ham_score = 0;
 	unsigned char similar_threshold = 10;
+	FILE *output = NULL;
 
-	struct entry *entry_arr;
+	struct entry *entry_arr = NULL;
+	int ret = 0;
+	size_t i;
 
 	while ((flag = portoptVerbose(argl, argv, opts, num_opts, &ind)) != -1)
 	{
@@ -228,6 +232,17 @@ int main(int argc, char **argv)
 					portoptGetArg(argl, argv, &ind));
 
 				break;
+			case 'o':
+				if ((output = fopen(portoptGetArg(argl, argv, 
+					&ind), "wb")) == NULL)
+				{
+					fputs("Failed to open output file\n",
+						stderr);
+
+					goto CLEANUP;
+				}
+
+				break;
 			case 'v':
 				verbose = PORTOPT_TRUE;
 
@@ -235,7 +250,7 @@ int main(int argc, char **argv)
 			case 'h':
 				printHelp();
 
-				return 0;
+				goto CLEANUP;
 			case '?': /* fallthrough */
 			default:
 				break;
@@ -248,32 +263,65 @@ int main(int argc, char **argv)
 	{
 		printHelp();
 
-		return 0;
+		goto CLEANUP;
 	}
 
 	if ((entry_arr = malloc(sizeof(struct entry) * (argl - ind))) == NULL)
 	{
 		fprintf(stderr, "Allocation failure\n");
+		ret = 1;
 
-		return 1;
+		goto CLEANUP;
 	}
 
-	left_print = fingerPrintFile(argv[ind]);
-	right_print = fingerPrintFile(argv[ind + 1]);
-	ham_score = calculateHamming(left_print, right_print);
-
-	if (verbose)
+	/* Would probably be faster to load the entire thing and then do any
+	 * comparisons required */
+	for (i = 0; ind < argl; i++, ind++)
 	{
-		fprintf(stderr, "hash 1: %016lx\n", left_print);
-		fprintf(stderr, "hash 2: %016lx\n", right_print);
-		fprintf(stderr, "Score: %d, %d%% similar\n", 
-			ham_score, ((64 - ham_score) * 100) / 64);
+		size_t j;
+
+		entry_arr[i].print = fingerprintFile(argv[ind]);
+		entry_arr[i].path  = argv[ind];
+
+		for (j = 0; j < i; j++)
+		{
+			const unsigned char ham_score = calculateHamming(
+				entry_arr[j].print, entry_arr[i].print);
+
+			if (ham_score < similar_threshold)
+			{
+				if (verbose)
+				{
+					fprintf(stdout, "score: %d\n", 
+						ham_score);
+				}
+
+				fprintf(stdout, "'%s' == '%s'\n",
+					entry_arr[j].path,
+					entry_arr[i].path);
+
+				if (output != NULL)
+				{
+					fprintf(output, "%s %s\n",
+						entry_arr[j].path,
+						entry_arr[i].path);
+				}
+			}
+		}
 	}
 
-	fprintf(stderr, "Inputs are likely %s\n",
-		(similar_threshold < ham_score) ? "different" : "similar");
-	free(entry_arr);
+CLEANUP:
 
-	return 0;
+	if (entry_arr != NULL)
+	{
+		free(entry_arr);
+	}
+
+	if (output != NULL)
+	{
+		fclose(output);
+	}
+
+	return ret;
 }
 
