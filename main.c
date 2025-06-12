@@ -1,3 +1,6 @@
+/* Duplicate Image Finder, A program to detect duplicate or similar image using
+ * a hamming distance */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -5,13 +8,41 @@
 
 #include "portopt.h"
 
+#ifndef DIF_DISABLE_THREADING
+#include "macroThreadPool.h"
+#endif
+
 #include "thirdparty/stb_image.h"
 #include "thirdparty/stb_image_resize.h"
 #include "thirdparty/stb_image_write.h" /* UNUSED */
 
-#define HASH_WIDTH  (8)
-#define HASH_HEIGHT (8)
-#define HASH_LENGTH (HASH_WIDTH * HASH_HEIGHT)
+#define DIF_WIDTH  (8)
+#define DIF_HEIGHT (8)
+#define DIF_LENGTH (DIF_WIDTH * DIF_HEIGHT)
+
+struct entry 
+{
+	uint64_t print;
+	const char *path;
+};
+
+static uint64_t fingerprintFile(const char * const path);
+
+#ifndef DIF_DISABLE_THREADING
+
+static void threadFunction(struct entry *node);
+
+MACRO_THREAD_POOL_COMPLETE(loader, struct entry *, threadFunction);
+
+static void threadFunction(struct entry *node)
+{
+	if (node != NULL)
+	{
+		node->print = fingerprintFile(node->path);
+	}
+}
+
+#endif /* DIF_DISABLE_THREADING */
 
 PORTOPT_BOOL verbose = PORTOPT_FALSE;
 
@@ -20,8 +51,6 @@ static int scaleImage(unsigned char * const src_data,
 	unsigned char * const dst_data, const size_t dst_width, 
 	const size_t dst_height)
 {
-	size_t i;
-
 	if ((src_data == NULL) || (dst_data == NULL))
 	{
 		fprintf(stderr, "Bad arguments to scaleImage\n");
@@ -37,12 +66,6 @@ static int scaleImage(unsigned char * const src_data,
 		fprintf(stderr, "Failed to rescale image\n");
 
 		goto BAIL_OUT;
-	}
-
-	/* Flatten down the grayscale even more to heighten the constrast */
-	for (i = 0; i < HASH_LENGTH; i++)
-	{
-		dst_data[i] = (dst_data[i] * 64) / UCHAR_MAX;
 	}
 
 	free(src_data);
@@ -96,22 +119,22 @@ static unsigned char getGrayscaleMean(const unsigned char * const data,
 	uint64_t mean = 0;
 	size_t i;
 
-	for (i = 0; i < HASH_LENGTH; i++)
+	for (i = 0; i < DIF_LENGTH; i++)
 	{
 		mean += data[i];
 	}
 
-	return (unsigned char) (mean / HASH_LENGTH);
+	return (unsigned char) (mean / DIF_LENGTH);
 }
 
 static uint64_t getFingerprint(const unsigned char * const data)
 {
-	unsigned char mean = getGrayscaleMean(data, HASH_WIDTH, HASH_HEIGHT);
+	unsigned char mean = getGrayscaleMean(data, DIF_WIDTH, DIF_HEIGHT);
 	uint64_t fingerprint = 0;
 	size_t i;
 	size_t j = 0;
 
-	for (i = 0; i < HASH_LENGTH; i++)
+	for (i = 0; i < DIF_LENGTH; i++)
 	{
 		/* casting here is important as otherwise it tries to use an
 		 * int for the mask */
@@ -150,7 +173,7 @@ static unsigned char calculateHamming(const uint64_t foo, const uint64_t bar)
 	unsigned char score = 0;
 	size_t i;
 
-	for (i = 0; i < HASH_LENGTH; i++)
+	for (i = 0; i < DIF_LENGTH; i++)
 	{
 		if (diff & (((uint64_t) 1) << i))
 		{
@@ -163,14 +186,14 @@ static unsigned char calculateHamming(const uint64_t foo, const uint64_t bar)
 
 static uint64_t fingerprintFile(const char * const path)
 {
-	unsigned char img_data[HASH_LENGTH];
+	unsigned char img_data[DIF_LENGTH];
 
 	if (path == NULL)
 	{
 		return 0;
 	}
 
-	if (readImageFile(path, HASH_WIDTH, HASH_HEIGHT, img_data) != 0)
+	if (readImageFile(path, DIF_WIDTH, DIF_HEIGHT, img_data) != 0)
 	{
 		fprintf(stderr, "Failed to load image data\n");
 
@@ -184,10 +207,11 @@ static void printHelp(void)
 {
 	fputs("Image Comparison Program\n\n", stdout);
 	fputs("Usage:\n", stdout);
-	fputs("\t./a.out [flags]... [images]...\n\n", stdout);
+	fputs("\t./difDemo [flags]... [images]...\n\n", stdout);
 	fputs("Command Line Flags:\n", stdout);
 	fputs("\t-t, --threshold <NUM> : Similarity limit, default 10\n", 
 		stdout);
+	fputs("\t-T, --threads   <NUM> : Number of threads to use\n", stdout);
 	fputs("\t-o, --output <PATH>   : Path to output file\n", stdout);
 	fputs("\t-v, --verbose         : Enables extra information output\n",
 		stdout);
@@ -196,18 +220,13 @@ static void printHelp(void)
 	fputs("\n", stdout);
 }
 
-struct entry 
-{
-	uint64_t print;
-	const char *path;
-};
-
 int main(int argc, char **argv)
 {
 	const struct portoptVerboseOpt opts[] =
 	{
 		{'t', "threshold", PORTOPT_TRUE},
 		{'o', "output",    PORTOPT_TRUE},
+		{'T', "threads",   PORTOPT_TRUE},
 		{'v', "verbose",   PORTOPT_FALSE},
 		{'h', "help",      PORTOPT_FALSE}
 	};
@@ -218,10 +237,14 @@ int main(int argc, char **argv)
 
 	unsigned char similar_threshold = 10;
 	FILE *output = NULL;
+#ifndef DIF_DISABLE_THREADING
+	unsigned char num_threads = 1;
+	struct loaderThreadPool *pool = NULL;
+#endif
 
 	struct entry *entry_arr = NULL;
 	int ret = 0;
-	size_t i;
+	size_t lim, i, j;
 
 	while ((flag = portoptVerbose(argl, argv, opts, num_opts, &ind)) != -1)
 	{
@@ -232,6 +255,13 @@ int main(int argc, char **argv)
 					portoptGetArg(argl, argv, &ind));
 
 				break;
+#ifndef DIF_DISABLE_THREADING
+			case 'T':
+				num_threads = atol(
+					portoptGetArg(argl, argv, &ind));
+
+				break;
+#endif
 			case 'o':
 				if ((output = fopen(portoptGetArg(argl, argv, 
 					&ind), "wb")) == NULL)
@@ -266,7 +296,19 @@ int main(int argc, char **argv)
 		goto CLEANUP;
 	}
 
-	if ((entry_arr = malloc(sizeof(struct entry) * (argl - ind))) == NULL)
+#ifndef DIF_DISABLE_THREADING
+	if ((pool = loaderNewThreadPool(num_threads, num_threads)) == NULL)
+	{
+		fprintf(stderr, "Failed to initialize thread pool\n");
+		ret = 1;
+
+		goto CLEANUP;
+	}
+#endif
+
+	lim = argl - ind;
+
+	if ((entry_arr = malloc(sizeof(struct entry) * lim)) == NULL)
 	{
 		fprintf(stderr, "Allocation failure\n");
 		ret = 1;
@@ -276,13 +318,26 @@ int main(int argc, char **argv)
 
 	/* Would probably be faster to load the entire thing and then do any
 	 * comparisons required */
-	for (i = 0; ind < argl; i++, ind++)
+#ifndef DIF_DISABLE_THREADING
+	for (i = 0; (i < lim) && (ind < argl); i++, ind++)
 	{
-		size_t j;
+		entry_arr[i].path = argv[ind];
+		loaderEnqueueJob(pool, &entry_arr[i]);
+	}
 
+	loaderWaitOnIdle(pool);
+#else
+	for (i = 0; (i < lim) && (ind < argl); i++, ind++)
+	{
+		entry_arr[i].path = argv[ind];
 		entry_arr[i].print = fingerprintFile(argv[ind]);
-		entry_arr[i].path  = argv[ind];
+	}
+#endif
 
+	fprintf(stderr, "loading complete\n");
+
+	for (i = 0; i < lim; i++)
+	{
 		for (j = 0; j < i; j++)
 		{
 			const unsigned char ham_score = calculateHamming(
@@ -311,6 +366,10 @@ int main(int argc, char **argv)
 	}
 
 CLEANUP:
+
+#ifndef DIF_DISABLE_THREADING
+	loaderCleanupThreadPool(pool);
+#endif
 
 	if (entry_arr != NULL)
 	{
