@@ -5,6 +5,8 @@
 *.swp
 *.txt
 *.pdf
+*.data
+*.old
 imgHashing.c
 commitTmp.txt
 difDemo

@@ -211,7 +211,8 @@ static void printHelp(void)
 	fputs("Command Line Flags:\n", stdout);
 	fputs("\t-t, --threshold <NUM> : Similarity limit, default 10\n", 
 		stdout);
-	fputs("\t-T, --threads   <NUM> : Number of threads to use\n", stdout);
+	fputs("\t-T, --threads   <NUM> : Thread max, if built, default 5\n", 
+		stdout);
 	fputs("\t-o, --output <PATH>   : Path to output file\n", stdout);
 	fputs("\t-v, --verbose         : Enables extra information output\n",
 		stdout);
@@ -238,7 +239,7 @@ int main(int argc, char **argv)
 	unsigned char similar_threshold = 10;
 	FILE *output = NULL;
 #ifndef DIF_DISABLE_THREADING
-	unsigned char num_threads = 1;
+	unsigned char num_threads = 5;
 	struct loaderThreadPool *pool = NULL;
 #endif
 
@@ -255,13 +256,16 @@ int main(int argc, char **argv)
 					portoptGetArg(argl, argv, &ind));
 
 				break;
-#ifndef DIF_DISABLE_THREADING
 			case 'T':
+#ifndef DIF_DISABLE_THREADING
 				num_threads = atol(
 					portoptGetArg(argl, argv, &ind));
+#else
+				fputs("Not built with threading support",
+					stderr);
+#endif
 
 				break;
-#endif
 			case 'o':
 				if ((output = fopen(portoptGetArg(argl, argv, 
 					&ind), "wb")) == NULL)
@@ -316,8 +320,6 @@ int main(int argc, char **argv)
 		goto CLEANUP;
 	}
 
-	/* Would probably be faster to load the entire thing and then do any
-	 * comparisons required */
 #ifndef DIF_DISABLE_THREADING
 	for (i = 0; (i < lim) && (ind < argl); i++, ind++)
 	{
@@ -351,13 +353,13 @@ int main(int argc, char **argv)
 						ham_score);
 				}
 
-				fprintf(stdout, "'%s' == '%s'\n",
+				fprintf(stdout, "\"%s\" \"%s\"\n",
 					entry_arr[j].path,
 					entry_arr[i].path);
 
 				if (output != NULL)
 				{
-					fprintf(output, "%s %s\n",
+					fprintf(output, "\"%s\" \"%s\"\n",
 						entry_arr[j].path,
 						entry_arr[i].path);
 				}
