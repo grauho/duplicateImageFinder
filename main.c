@@ -9,7 +9,7 @@
 #include "portopt.h"
 
 #ifndef DIF_DISABLE_THREADING
-#include "macroThreadPool.h"
+#include "thirdparty/macroThreadPool.h"
 #endif
 
 #include "thirdparty/stb_image.h"
@@ -53,7 +53,7 @@ static int scaleImage(unsigned char * const src_data,
 {
 	if ((src_data == NULL) || (dst_data == NULL))
 	{
-		fprintf(stderr, "Bad arguments to scaleImage\n");
+		fputs("Bad arguments to scaleImage\n", stderr);
 
 		return -1;
 	}
@@ -63,7 +63,7 @@ static int scaleImage(unsigned char * const src_data,
 		STBIR_ALPHA_CHANNEL_NONE, 0, STBIR_EDGE_WRAP, 
 		STBIR_FILTER_TRIANGLE, STBIR_COLORSPACE_LINEAR, NULL) == 0)
 	{
-		fprintf(stderr, "Failed to rescale image\n");
+		fputs("Failed to rescale image\n", stderr);
 
 		goto BAIL_OUT;
 	}
@@ -94,7 +94,7 @@ int readImageFile(const char * const in_path, const size_t dst_width,
 
 	if (dst_data == NULL)
 	{
-		fprintf(stderr, "Must supply valid ALLOCATED output buffer\n");
+		fputs("Must supply valid ALLOCATED output buffer\n", stderr);
 
 		return -1;
 	}
@@ -195,7 +195,7 @@ static uint64_t fingerprintFile(const char * const path)
 
 	if (readImageFile(path, DIF_WIDTH, DIF_HEIGHT, img_data) != 0)
 	{
-		fprintf(stderr, "Failed to load image data\n");
+		fputs("Failed to load image data\n", stderr);
 
 		return 0;
 	}
@@ -205,20 +205,20 @@ static uint64_t fingerprintFile(const char * const path)
 
 static void printHelp(void)
 {
-	fputs("Image Comparison Program\n\n", stdout);
-	fputs("Usage:\n", stdout);
-	fputs("\t./difDemo [flags]... [images]...\n\n", stdout);
-	fputs("Command Line Flags:\n", stdout);
-	fputs("\t-t, --threshold <NUM> : Similarity limit, default 10\n", 
-		stdout);
+	fputs("Image Comparison Program\n\n", stderr);
+	fputs("Usage:\n", stderr);
+	fputs("\t./difDemo [flags]... [images]...\n\n", stderr);
+	fputs("Command Line Flags:\n", stderr);
+	fputs("\t-t, --threshold <NUM> : Similarity limit, default 5\n", 
+		stderr);
 	fputs("\t-T, --threads   <NUM> : Thread max, if built, default 5\n", 
-		stdout);
-	fputs("\t-o, --output <PATH>   : Path to output file\n", stdout);
+		stderr);
+	fputs("\t-o, --output <PATH>   : Path to output file\n", stderr);
 	fputs("\t-v, --verbose         : Enables extra information output\n",
-		stdout);
+		stderr);
 	fputs("\t-h, --help            : Prints this message and exits\n",
-		stdout);
-	fputs("\n", stdout);
+		stderr);
+	fputs("\n", stderr);
 }
 
 int main(int argc, char **argv)
@@ -236,7 +236,7 @@ int main(int argc, char **argv)
 	size_t ind = 0;
 	int flag;
 
-	unsigned char similar_threshold = 10;
+	unsigned char similar_threshold = 5;
 	FILE *output = NULL;
 #ifndef DIF_DISABLE_THREADING
 	unsigned char num_threads = 5;
@@ -303,7 +303,7 @@ int main(int argc, char **argv)
 #ifndef DIF_DISABLE_THREADING
 	if ((pool = loaderNewThreadPool(num_threads, num_threads)) == NULL)
 	{
-		fprintf(stderr, "Failed to initialize thread pool\n");
+		fputs("Failed to initialize thread pool\n", stderr);
 		ret = 1;
 
 		goto CLEANUP;
@@ -314,7 +314,7 @@ int main(int argc, char **argv)
 
 	if ((entry_arr = malloc(sizeof(struct entry) * lim)) == NULL)
 	{
-		fprintf(stderr, "Allocation failure\n");
+		fputs("Allocation failure\n", stderr);
 		ret = 1;
 
 		goto CLEANUP;
@@ -336,7 +336,7 @@ int main(int argc, char **argv)
 	}
 #endif
 
-	fprintf(stderr, "loading complete\n");
+	fputs("loading complete\n", stderr);
 
 	for (i = 0; i < lim; i++)
 	{

@@ -71,7 +71,6 @@ do                                                                           \
                                                                              \
 struct NAME##ThreadArgs                                                      \
 {                                                                            \
-	size_t thread_id;                                                    \
 	MTP_BOOL terminate;                                                  \
 	ElmType payload;                                                     \
 };                                                                           \
@@ -132,13 +131,13 @@ static void NAME##IdCreate(void)                                             \
 	signed int *thread_id = MTP_CALLOC(1, sizeof(signed int));           \
 	                                                                     \
 	pthread_mutex_lock(&(inc_mutex));                                    \
-	*thread_id = (runner < INT_MAX) ? (signed int) runner++ : -1;        \
+	*thread_id = (runner <= INT_MAX) ? (signed int) runner++ : -1;       \
 	pthread_mutex_unlock(&(inc_mutex));                                  \
 	pthread_once(&(NAME##_id_once), NAME##IdKeyCreate);                  \
 	pthread_setspecific(NAME##_id_key, thread_id);                       \
 }                                                                            \
                                                                              \
-static int NAME##GetThreadId(void)                                           \
+int NAME##GetThreadId(void)                                                  \
 {                                                                            \
 	int * const ret = pthread_getspecific(NAME##_id_key);                \
 	                                                                     \
