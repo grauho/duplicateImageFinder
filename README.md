@@ -25,7 +25,7 @@ define. eg:
 
     cc -Wall -pedantic -O2 -DDIF_DISABLE_THREADING  -c -o main.o main.c
     cc -Wall -pedantic -O2 -DDIF_DISABLE_THREADING  -c -o stb_body.o stb_body.c
-    cc -Wall -pedantic -O2 -DDIF_DISABLE_THREADING -o difDemo main.o stb_body.o -lpthread -lm
+    cc -Wall -pedantic -O2 -DDIF_DISABLE_THREADING -o difDemo main.o stb_body.o -lm
 
 
 # Options

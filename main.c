@@ -3,9 +3,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdint.h>
-#include <string.h>
-#include <limits.h>
+#include <stdint.h> /* uint64_t */
 
 #include "portopt.h"
 
@@ -39,6 +37,7 @@ int compareDensities(const void * const l_ptr, const void * const r_ptr)
 	return (left->density - right->density);
 }
 
+/* Cast to character pointer to avoid arithmetic on void pointers */
 #define ACCESS_VAR(arr, index, size) (((char *) (arr)) + ((index) * (size)))
 
 /* returns len on failed to find */
@@ -71,6 +70,10 @@ static size_t leftBinSearch(void *arr, const size_t len, const void *target,
  * definitionally a fingerprint differing by more than threshold bit density
  * will not have a hamming distance in the allowable range. The open question
  * is does this optimization warrent the time spent sorting the array */
+
+/* It's possible that the threads could insertion sort the array while loading
+ * the entries but that would require mutex locking a shared destination 
+ * array. Furthermore, this isn't currently the performance bottleneck. */
 static void doComparison(struct entry * const src, const size_t len, 
 	const unsigned char threshold, FILE *output)
 {
@@ -121,7 +124,7 @@ static void threadFunction(struct entry *node)
 	}
 }
 
-#endif /* DIF_DISABLE_THREADING */
+#endif /* !DIF_DISABLE_THREADING */
 
 PORTOPT_BOOL verbose = PORTOPT_FALSE;
 
@@ -321,7 +324,7 @@ int main(int argc, char **argv)
 #ifndef DIF_DISABLE_THREADING
 	unsigned char num_threads = 5;
 	struct loaderThreadPool *pool = NULL;
-#endif
+#endif /* !DIF_DISABLE_THREADING */
 
 	struct entry *entry_arr = NULL;
 	int ret = 0;
@@ -343,7 +346,7 @@ int main(int argc, char **argv)
 #else
 				fputs("Not built with threading support",
 					stderr);
-#endif
+#endif /* DIF_DISABLE_THREADING */
 
 				break;
 			case 'o':
@@ -388,7 +391,7 @@ int main(int argc, char **argv)
 
 		goto CLEANUP;
 	}
-#endif
+#endif /* !DIF_DISABLE_THREADING */
 
 	lim = argl - ind;
 
@@ -414,7 +417,7 @@ int main(int argc, char **argv)
 		entry_arr[i].path = argv[ind];
 		fingerprintFile(&entry_arr[i]);
 	}
-#endif
+#endif /* DIF_DISABLE_THREADING */
 
 	fputs("loading complete\n", stderr);
 	doComparison(entry_arr, lim, similar_threshold, output);
@@ -423,7 +426,7 @@ CLEANUP:
 
 #ifndef DIF_DISABLE_THREADING
 	loaderCleanupThreadPool(pool);
-#endif
+#endif /* !DIF_DISABLE_THREADING */
 
 	if (entry_arr != NULL)
 	{
