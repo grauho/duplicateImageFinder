@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <string.h>
 #include <limits.h>
 
 #include "portopt.h"
@@ -24,9 +25,87 @@ struct entry
 {
 	uint64_t print;
 	const char *path;
+	unsigned char density;
 };
 
-static uint64_t fingerprintFile(const char * const path);
+static void fingerprintFile(struct entry * const node);
+static unsigned char calculateHamming(const uint64_t foo, const uint64_t bar);
+
+int compareDensities(const void * const l_ptr, const void * const r_ptr)
+{
+	const struct entry * const left = (struct entry * const) l_ptr;
+	const struct entry * const right = (struct entry * const) r_ptr;
+
+	return (left->density - right->density);
+}
+
+#define ACCESS_VAR(arr, index, size) (((char *) (arr)) + ((index) * (size)))
+
+/* returns len on failed to find */
+static size_t leftBinSearch(void *arr, const size_t len, const void *target,
+	const size_t size, int (*CompFunc)(const void *, const void *))
+{
+	size_t left = 0;
+	size_t right = len;
+
+	while (left < right)
+	{
+		size_t mid = ((left + right) >> 1);
+
+		if (CompFunc(ACCESS_VAR(arr, mid, size), target) < 0)
+		{
+			left = mid + 1;
+		}
+		else
+		{
+			right = mid;
+		}
+	}
+
+	return left;
+}
+
+/* The idea here is just to make it so that the comparisons don't always have
+ * to start at the beginning of the entry array instead they can start at the
+ * density - threshold point found via using a binary search. This is because
+ * definitionally a fingerprint differing by more than threshold bit density
+ * will not have a hamming distance in the allowable range. The open question
+ * is does this optimization warrent the time spent sorting the array */
+static void doComparison(struct entry * const src, const size_t len, 
+	const unsigned char threshold, FILE *output)
+{
+	size_t i, j;
+
+	qsort(src, len, sizeof(struct entry), compareDensities);
+
+	for (i = 0; i < len; i++)
+	{
+		const unsigned char target_density 
+			= (src[i].density < threshold) 
+				? 0 : src[i].density - threshold;
+		const struct entry dummy = {0, 0, target_density};
+		const size_t fnd = leftBinSearch(src, len, &dummy, 
+			sizeof(struct entry), compareDensities);
+
+		for (j = fnd; j < i; j++)
+		{
+			const unsigned char score = calculateHamming(
+				src[i].print, src[j].print);
+
+			if ((score <= threshold) && (j != i))
+			{
+				fprintf(stdout, "\"%s\" \"%s\"\n",
+					src[i].path, src[j].path);
+
+				if (output != NULL)
+				{
+					fprintf(output, "\"%s\" \"%s\"\n",
+						src[i].path, src[j].path);
+				}
+			}
+		}
+	}
+}
 
 #ifndef DIF_DISABLE_THREADING
 
@@ -38,7 +117,7 @@ static void threadFunction(struct entry *node)
 {
 	if (node != NULL)
 	{
-		node->print = fingerprintFile(node->path);
+		fingerprintFile(node);
 	}
 }
 
@@ -116,29 +195,36 @@ int readImageFile(const char * const in_path, const size_t dst_width,
 static unsigned char getGrayscaleMean(const unsigned char * const data,
 	const unsigned int width, const unsigned int height)
 {
+	const size_t lim = width * height;
 	uint64_t mean = 0;
 	size_t i;
 
-	for (i = 0; i < DIF_LENGTH; i++)
+	for (i = 0; i < lim; i++)
 	{
 		mean += data[i];
 	}
 
-	return (unsigned char) (mean / DIF_LENGTH);
+	return (unsigned char) (mean / lim);
 }
 
-static uint64_t getFingerprint(const unsigned char * const data)
+static void getFingerprintWithDensity(const unsigned char * const data,
+	struct entry * const out)
 {
 	unsigned char mean = getGrayscaleMean(data, DIF_WIDTH, DIF_HEIGHT);
-	uint64_t fingerprint = 0;
-	size_t i;
-	size_t j = 0;
+	size_t i, j = 0;
+
+	out->density = 0;
+	out->print = 0;
 
 	for (i = 0; i < DIF_LENGTH; i++)
 	{
 		/* casting here is important as otherwise it tries to use an
 		 * int for the mask */
-		fingerprint |= (((uint64_t) ((data[i] > mean) ? 1 : 0)) << i);
+		if (data[i] > mean)
+		{
+			out->print |= (((uint64_t) 1) << i);
+			out->density++;
+		}
 
 		if (verbose)
 		{
@@ -157,14 +243,6 @@ static uint64_t getFingerprint(const unsigned char * const data)
 			}
 		}
 	}
-
-	if (verbose)
-	{
-		fprintf(stdout, "%lu\n%lx\n", fingerprint, fingerprint);
-		fputc('\n', stdout);
-	}
-
-	return fingerprint;
 }
 
 static unsigned char calculateHamming(const uint64_t foo, const uint64_t bar)
@@ -184,23 +262,25 @@ static unsigned char calculateHamming(const uint64_t foo, const uint64_t bar)
 	return score;
 }
 
-static uint64_t fingerprintFile(const char * const path)
+static void fingerprintFile(struct entry * const node)
 {
 	unsigned char img_data[DIF_LENGTH];
 
-	if (path == NULL)
+	if (node == NULL) 
 	{
-		return 0;
+		return;
 	}
 
-	if (readImageFile(path, DIF_WIDTH, DIF_HEIGHT, img_data) != 0)
-	{
-		fputs("Failed to load image data\n", stderr);
+	node->print = 0;
+	node->density = 0;
 
-		return 0;
+	if ((node->path == NULL)
+	|| (readImageFile(node->path, DIF_WIDTH, DIF_HEIGHT, img_data) != 0))
+	{
+		return;
 	}
 
-	return getFingerprint(img_data);
+	getFingerprintWithDensity(img_data, node);
 }
 
 static void printHelp(void)
@@ -245,7 +325,7 @@ int main(int argc, char **argv)
 
 	struct entry *entry_arr = NULL;
 	int ret = 0;
-	size_t lim, i, j;
+	size_t lim, i;
 
 	while ((flag = portoptVerbose(argl, argv, opts, num_opts, &ind)) != -1)
 	{
@@ -332,40 +412,12 @@ int main(int argc, char **argv)
 	for (i = 0; (i < lim) && (ind < argl); i++, ind++)
 	{
 		entry_arr[i].path = argv[ind];
-		entry_arr[i].print = fingerprintFile(argv[ind]);
+		fingerprintFile(&entry_arr[i]);
 	}
 #endif
 
 	fputs("loading complete\n", stderr);
-
-	for (i = 0; i < lim; i++)
-	{
-		for (j = 0; j < i; j++)
-		{
-			const unsigned char ham_score = calculateHamming(
-				entry_arr[j].print, entry_arr[i].print);
-
-			if (ham_score < similar_threshold)
-			{
-				if (verbose)
-				{
-					fprintf(stdout, "score: %d\n", 
-						ham_score);
-				}
-
-				fprintf(stdout, "\"%s\" \"%s\"\n",
-					entry_arr[j].path,
-					entry_arr[i].path);
-
-				if (output != NULL)
-				{
-					fprintf(output, "\"%s\" \"%s\"\n",
-						entry_arr[j].path,
-						entry_arr[i].path);
-				}
-			}
-		}
-	}
+	doComparison(entry_arr, lim, similar_threshold, output);
 
 CLEANUP:
 
