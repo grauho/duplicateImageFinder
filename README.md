@@ -13,6 +13,12 @@ normally one need only invoke:
 
     make
 
+The Makefile also includes the option to use ImageMagicks MagickCore API 
+instead of the stb header libraries for the image loading should the user have
+the library installed and accessible. To build with this option enabled invoke:
+
+    make magick 
+
 Additionally, to list the various alternative targets and their information
 one simply need invoke:
 
@@ -59,6 +65,14 @@ Copies of which are found in the bodies of their respective files.
 Please report any bugs along with pertinent environmental information to the 
 bugs section of this repository. Feature suggestions or requests are not bugs. 
 
+## Known Bugs
+* If using the MagickCore API ImageMagick doesn't seem to free all of its 
+  allocated resources at program termination. This is worth keeping in mind if 
+  using a resource analyzer such as valgrind. 
+
+* Non-image or invalid files are assigned a dummy fingerprint of zero and thus 
+  are all considered matches for each other. This will be addressed in future. 
+
 # Authors
     Grauho <grauho@proton.me>
 
@@ -68,3 +82,4 @@ Copyright (c) Grauho 2025, All Rights Reserved
 # See Also
 * [simpleHeaderLibraries] (https://github.com/grauho/simpleHeaderLibraries)
 * [stb Image Libraries] (https://github.com/nothings/stb)
+* [ImageMagick] (https://imagemagick.org/)

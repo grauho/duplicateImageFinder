@@ -4,16 +4,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h> /* uint64_t */
+#include <limits.h>
 
 #include "portopt.h"
 
 #ifndef DIF_DISABLE_THREADING
 #include "thirdparty/macroThreadPool.h"
 #endif
-
-#include "thirdparty/stb_image.h"
-#include "thirdparty/stb_image_resize.h"
-#include "thirdparty/stb_image_write.h" /* UNUSED */
+#include "imageHandling.h"
 
 #define DIF_WIDTH  (8)
 #define DIF_HEIGHT (8)
@@ -127,73 +125,6 @@ static void threadFunction(struct entry *node)
 #endif /* !DIF_DISABLE_THREADING */
 
 PORTOPT_BOOL verbose = PORTOPT_FALSE;
-
-static int scaleImage(unsigned char * const src_data, 
-	const size_t src_width, const size_t src_height, 
-	unsigned char * const dst_data, const size_t dst_width, 
-	const size_t dst_height)
-{
-	if ((src_data == NULL) || (dst_data == NULL))
-	{
-		fputs("Bad arguments to scaleImage\n", stderr);
-
-		return -1;
-	}
-
-	if (stbir_resize_uint8_generic(src_data, src_width, src_height, 0,
-		dst_data, dst_width, dst_height, 0, 1, 
-		STBIR_ALPHA_CHANNEL_NONE, 0, STBIR_EDGE_WRAP, 
-		STBIR_FILTER_TRIANGLE, STBIR_COLORSPACE_LINEAR, NULL) == 0)
-	{
-		fputs("Failed to rescale image\n", stderr);
-
-		goto BAIL_OUT;
-	}
-
-	free(src_data);
-
-	return 0;
-
-BAIL_OUT:
-
-	if (src_data != NULL)
-	{
-		free(src_data);
-	}
-
-	return -1;
-
-}
-
-int readImageFile(const char * const in_path, const size_t dst_width,
-	const size_t dst_height, unsigned char *output)
-{
-	int src_width;
-	int src_height;
-	int dummy;
-	unsigned char *src_data = NULL;
-	unsigned char *dst_data = output;
-
-	if (dst_data == NULL)
-	{
-		fputs("Must supply valid ALLOCATED output buffer\n", stderr);
-
-		return -1;
-	}
-
-	/* loads as grayscale */
-	if ((src_data = stbi_load(in_path, &src_width, &src_height, &dummy, 1))
-		== NULL)
-	{
-		fprintf(stderr, "Failed load: '%s'\n", in_path);
-		free(src_data);
-
-		return -1;
-	}
-
-	return scaleImage(src_data, src_width, src_height, dst_data, dst_width, 
-		dst_height);
-}
 
 static unsigned char getGrayscaleMean(const unsigned char * const data,
 	const unsigned int width, const unsigned int height)
@@ -330,6 +261,8 @@ int main(int argc, char **argv)
 	int ret = 0;
 	size_t lim, i;
 
+	initializeImageHandling(argv[0]);
+
 	while ((flag = portoptVerbose(argl, argv, opts, num_opts, &ind)) != -1)
 	{
 		switch (flag)
@@ -427,6 +360,8 @@ CLEANUP:
 #ifndef DIF_DISABLE_THREADING
 	loaderCleanupThreadPool(pool);
 #endif /* !DIF_DISABLE_THREADING */
+
+	cleanupImageHandling();
 
 	if (entry_arr != NULL)
 	{
